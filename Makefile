@@ -109,6 +109,11 @@ else
 COMPILER := unknown
 endif
 
+# ASAN includes DEBUG
+ifdef ASAN
+DEBUG=1
+endif
+
 # ----------
 
 # Base CFLAGS. These may be overridden by the environment.
@@ -116,6 +121,9 @@ endif
 # will likely break this crappy code.
 ifdef DEBUG
 CFLAGS ?= -O0 -g -Wall -pipe
+ifdef ASAN
+CFLAGS += -fsanitize=address
+endif
 else
 CFLAGS ?= -O2 -Wall -pipe -fomit-frame-pointer
 endif
@@ -126,7 +134,9 @@ endif
 #   to get it there...
 #  -fwrapv for defined integer wrapping. MSVC6 did this
 #   and the game code requires it.
-override CFLAGS += -std=gnu99 -fno-strict-aliasing -fwrapv
+#  -fvisibility=hidden to keep symbols hidden. This is
+#   mostly best practice and not really necessary.
+override CFLAGS += -std=gnu99 -fno-strict-aliasing -fwrapv -fvisibility=hidden
 
 # -MMD to generate header dependencies. Unsupported by
 #  the Clang shipped with OS X.
@@ -266,6 +276,11 @@ else ifeq ($(YQ2_OSTYPE),Windows)
 LDFLAGS ?= -L/usr/lib
 endif
 
+# Link address sanitizer if requested.
+ifdef ASAN
+LDFLAGS += -fsanitize=address
+endif
+
 # Required libraries.
 ifeq ($(YQ2_OSTYPE),Linux)
 override LDFLAGS += -lm -ldl -rdynamic
@@ -277,11 +292,9 @@ else ifeq ($(YQ2_OSTYPE),Windows)
 override LDFLAGS += -lws2_32 -lwinmm -static-libgcc
 else ifeq ($(YQ2_OSTYPE), Darwin)
 override LDFLAGS += -arch $(YQ2_ARCH)
+else ifeq ($(YQ2_OSTYPE), Haiku)
+override LDFLAGS += -lm -lnetwork
 endif
-
-# Keep symbols hidden.
-override CFLAGS += -fvisibility=hidden
-override LDFLAGS += -fvisibility=hidden
 
 ifneq ($(YQ2_OSTYPE), Darwin)
 ifneq ($(YQ2_OSTYPE), OpenBSD)
@@ -422,7 +435,30 @@ release/quake2 : CFLAGS += -DUSE_OPENAL -DDEFAULT_OPENAL_DRIVER='"libopenal.so.1
 endif
 endif
 
+ifeq ($(YQ2_OSTYPE), Linux)
+release/quake2 : CFLAGS += -DHAVE_EXECINFO
+endif
+
+ifeq ($(YQ2_OSTYPE), Darwin)
+release/quake2 : CFLAGS += -DHAVE_EXECINFO
+endif
+
+ifeq ($(YQ2_OSTYPE), SunOS)
+release/quake2 : CFLAGS += -DHAVE_EXECINFO
+endif
+
 ifeq ($(YQ2_OSTYPE), FreeBSD)
+release/quake2 : CFLAGS += -DHAVE_EXECINFO
+release/quake2 : LDFLAGS += -lexecinfo
+endif
+
+ifeq ($(YQ2_OSTYPE), OpenBSD)
+release/quake2 : CFLAGS += -DHAVE_EXECINFO
+release/quake2 : LDFLAGS += -lexecinfo
+endif
+
+ifeq ($(YQ2_OSTYPE), Haiku)
+release/quake2 : CFLAGS += -DHAVE_EXECINFO
 release/quake2 : LDFLAGS += -lexecinfo
 endif
 

@@ -104,14 +104,17 @@ CreateSDLWindow(int flags, int w, int h)
 		   https://bugzilla.libsdl.org/show_bug.cgi?id=4700 */
 		SDL_DisplayMode real_mode;
 
-		if (SDL_GetWindowDisplayMode(window, &real_mode) != 0)
+		if ((flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)) == SDL_WINDOW_FULLSCREEN)
 		{
-			SDL_DestroyWindow(window);
-			window = NULL;
+			if (SDL_GetWindowDisplayMode(window, &real_mode) != 0)
+			{
+				SDL_DestroyWindow(window);
+				window = NULL;
 
-			Com_Printf("Can't get display mode: %s\n", SDL_GetError());
+				Com_Printf("Can't get display mode: %s\n", SDL_GetError());
 
-			return false;
+				return false;
+			}
 		}
 
 		/* SDL_WINDOW_FULLSCREEN_DESKTOP implies SDL_WINDOW_FULLSCREEN! */
@@ -402,15 +405,17 @@ GLimp_Init(void)
 		SDL_version version;
 
 		SDL_GetVersion(&version);
+		Com_Printf("-------- vid initialization --------\n");
 		Com_Printf("SDL version is: %i.%i.%i\n", (int)version.major, (int)version.minor, (int)version.patch);
 		Com_Printf("SDL video driver is \"%s\".\n", SDL_GetCurrentVideoDriver());
 
 		num_displays = SDL_GetNumVideoDisplays();
 		InitDisplayIndices();
 		ClampDisplayIndexCvar();
-		Com_Printf("SDL didplay modes:\n");
+		Com_Printf("SDL display modes:\n");
 
 		PrintDisplayModes();
+		Com_Printf("------------------------------------\n\n");
 	}
 
 	return true;
@@ -580,8 +585,7 @@ GLimp_InitGraphics(int fullscreen, int *pwidth, int *pheight)
 	}
 	else
 	{
-		Com_Printf("Real display mode: %ix%i@%i (vid_fullscreen: %i)\n", mode.w, mode.h,
-				mode.refresh_rate, fullscreen);
+		Com_Printf("Real display mode: %ix%i@%i\n", mode.w, mode.h, mode.refresh_rate);
 	}
 
 

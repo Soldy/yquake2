@@ -33,6 +33,7 @@
 
 
 #define MAX_HANDLES 512
+#define MAX_MODS 32
 #define MAX_PAKS 100
 
 #ifdef SYSTEMWIDE
@@ -1254,6 +1255,107 @@ FS_FreeList(char **list, int nfiles)
 }
 
 /*
+ * Combs all Raw search paths to find game dirs containing PAK/PK2/PK3 files.
+ * Returns an alphabetized array of unique relative dir names.
+ */
+char**
+FS_ListMods(int *nummods)
+{
+	int nmods = 0, numdirchildren, numpacksinchilddir, searchpathlength;
+	char findnamepattern[MAX_OSPATH], modname[MAX_QPATH], searchpath[MAX_OSPATH];
+	char **dirchildren, **packsinchilddir, **modnames;
+
+	modnames = malloc((MAX_QPATH + 1) * (MAX_MODS + 1));
+	memset(modnames, 0, (MAX_QPATH + 1) * (MAX_MODS + 1));
+
+	// iterate over all Raw paths
+	for (fsRawPath_t *search = fs_rawPath; search; search = search->next)
+	{
+		searchpathlength = strlen(search->path);
+		if(!searchpathlength)
+		{
+			continue;
+		}
+
+		// make sure this Raw path ends with a '/' otherwise FS_ListFiles will open its parent dir
+		if(search->path[searchpathlength - 1] != '/')
+		{
+			Com_sprintf(searchpath, sizeof(searchpath), "%s/*", search->path);
+		}
+		else
+		{
+			Com_sprintf(searchpath, sizeof(searchpath), "%s*", search->path);
+		}
+
+		dirchildren = FS_ListFiles(searchpath, &numdirchildren, 0, 0);
+
+		if (dirchildren == NULL)
+		{
+			continue;
+		}
+
+		// iterate over the children of this Raw path (unless we've already got enough mods)
+		for (int i = 0; i < numdirchildren && nmods < MAX_MODS; i++)
+		{
+			if(dirchildren[i] == NULL)
+			{
+				continue;
+			}
+
+			numpacksinchilddir = 0;
+
+			// iterate over supported pack types, but ignore ZIP files (they cause false positives)
+			for (int j = 0; j < sizeof(fs_packtypes) / sizeof(fs_packtypes[0]); j++)
+			{
+				if (strcmp("zip", fs_packtypes[j].suffix) != 0)
+				{
+					Com_sprintf(findnamepattern, sizeof(findnamepattern), "%s/*.%s", dirchildren[i], fs_packtypes[j].suffix);
+
+					packsinchilddir = FS_ListFiles(findnamepattern, &numpacksinchilddir, 0, 0);
+					FS_FreeList(packsinchilddir, numpacksinchilddir);
+
+					// if this dir has some pack files, add it if not already in the list
+					if (numpacksinchilddir > 0)
+					{
+						qboolean matchfound = false;
+
+						Com_sprintf(modname, sizeof(modname), "%s", strrchr(dirchildren[i], '/') + 1);
+
+						for (int k = 0; k < nmods; k++)
+						{
+							if (strcmp(modname, modnames[k]) == 0)
+							{
+								matchfound = true;
+								break;
+							}
+						}
+
+						if (!matchfound)
+						{
+							modnames[nmods] = malloc(strlen(modname) + 1);
+							strcpy(modnames[nmods], modname);
+
+							nmods++;
+						}
+
+						break;
+					}
+				}
+			}
+		}
+
+		FS_FreeList(dirchildren, numdirchildren);
+	}
+
+	modnames[nmods] = 0;
+
+	qsort(modnames, nmods, sizeof(modnames[0]), Q_sort_strcomp);
+
+	*nummods = nmods;
+	return modnames;
+}
+
+/*
  * Directory listing.
  */
 void
@@ -1672,6 +1774,19 @@ FS_BuildGameSpecificSearchPath(char *dir)
 	// list of music tracks needs to be loaded again (=> tracks
 	// are possibly from the new mod dir)
 	OGG_InitTrackList();
+
+	// ...and the current list of maps in the "start network server" menu is
+	// cleared so that it will be re-initialized when the menu is accessed
+	if (mapnames != NULL)
+	{
+		for (i = 0; i < nummaps; i++)
+		{
+			free(mapnames[i]);
+		}
+
+		free(mapnames);
+		mapnames = NULL;
+	}
 #endif
 }
 
@@ -1689,11 +1804,45 @@ const char* FS_GetFilenameForHandle(fileHandle_t f)
 
 // --------
 
-void FS_AddDirToRawPath (const char *dir, qboolean create) {
-	fsRawPath_t *search;
+void FS_AddDirToRawPath (const char *rawdir, qboolean create) {
+	char dir[MAX_OSPATH] = {0};
 
-	// Add the directory
-	search = Z_Malloc(sizeof(fsRawPath_t));
+	// Get the realpath.
+	Sys_Realpath(rawdir, dir, sizeof(dir));
+
+	// Convert backslashes to forward slashes.
+	for (int i = 0; i < strlen(dir); i++)
+	{
+		if (dir[i] == '\\')
+		{
+			dir[i] = '/';
+		}
+	}
+
+	// Make sure that the dir doesn't end with a slash.
+	for (size_t s = strlen(dir) - 1; s >= 0; s--)
+	{
+		if (dir[s] == '/')
+		{
+			dir[s] = '\0';
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	// Bail out if the dir was already added.
+	for (fsRawPath_t *search = fs_rawPath; search; search = search->next)
+	{
+		if (strcmp(search->path, dir) == 0)
+		{
+			return;
+		}
+	}
+
+	// Add the directory.
+	fsRawPath_t *search = Z_Malloc(sizeof(fsRawPath_t));
 	Q_strlcpy(search->path, dir, sizeof(search->path));
 	search->create = create;
 	search->next = fs_rawPath;
@@ -1787,4 +1936,3 @@ FS_InitFilesystem(void)
 	// Debug output
 	Com_Printf("Using '%s' for writing.\n", fs_gamedir);
 }
-
